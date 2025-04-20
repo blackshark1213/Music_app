@@ -3,6 +3,7 @@ package com.keshav.drone.mymusic.offline
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.media.Image
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -33,6 +34,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.core.app.ActivityCompat
 
 import android.net.Uri
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,29 +58,50 @@ import androidx.navigation.compose.rememberNavController
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavController
 
-//import androidx.compose.foundation.slider.Slider
-//
-//import com.google.android.exoplayer2.*
-//import com.google.android.exoplayer2.media3.MediaItem
-//import com.google.android.exoplayer2.ExoPlayer
-//import com.google.android.exoplayer2.MediaItem
-
 import androidx.compose.material.icons.filled.Pause
 
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.SliderColors
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.colorResource
+//import coil.compose.rememberAsyncImagePainter
 
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
+
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
         setContent {
 //            MusicAppUI(this)
-            MyAppNavigation()
+
+            // Declare ViewModel scoped to the activity
+            val musicViewModel: MusicViewModel = viewModel()
+
+            // Pass it to NavHost
+            MyAppNavigation(musicViewModel)
+            //MyAppNavigation()
         }
         requestStoragePermission()
 
@@ -104,20 +127,19 @@ data class Song(
     val path: String
 )
 
-
 @Composable
-fun MyAppNavigation() {
+fun MyAppNavigation(musicViewModel: MusicViewModel) {
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
             val context = LocalContext.current
-            MusicAppUI(context , navController)
+            // MusicUI call and share its content
+            MusicAppUI(context , navController , musicViewModel)
         }
 
-        composable("music/{title}/{path}/{isPlaying}") { backStackEntry ->
-            val songTitle = backStackEntry.arguments?.getString("songTitle")
+        composable("music/{path}") { backStackEntry ->
             val songPath = backStackEntry.arguments?.getString("songPath")
-            val isPlaying = backStackEntry.arguments?.getString("isPlaying")?.toBoolean() ?: false
+//            val isPlaying = backStackEntry.arguments?.getString("isPlaying")?.toBoolean() ?: false
             val context = LocalContext.current
 
             val exoPlayer = remember(context) {
@@ -126,10 +148,9 @@ fun MyAppNavigation() {
 
             PlayerUI(
                 navController = navController,
-                songTitle = songTitle ?: "",
                 songPath = songPath ?: "",
                 exoPlayer = exoPlayer,
-                isPlayingM = isPlaying,
+                VM = musicViewModel,
             )
         }
 
@@ -139,43 +160,14 @@ fun MyAppNavigation() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MusicAppUI(context: Context , navController: NavController) {
-
-
-    val songs = remember { mutableStateListOf<Song>() }
-    var currentSong by remember { mutableStateOf<Song?>(null) }
-    var searchText by remember { mutableStateOf("") }
-    var currentSongIndex by remember { mutableIntStateOf(0) }
+fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewModel) {
 
     // Get ViewModel
-   val MV: MusicViewModel = viewModel()
+//    val MV: MusicViewModel = viewModel()
+    var searchText by remember { mutableStateOf("") }
 
     lateinit var exoPlayer: ExoPlayer
 
-    // playing song at any index
-    fun playSongAt(index: Int) {
-        if (index in MV.songs.indices) {
-            val song = MV.songs[index]
-            currentSong = song
-            currentSongIndex = index
-
-            exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(song.path)))
-            exoPlayer.prepare()
-            exoPlayer.play()
-        }
-    }
-
-    // it will call automatically after the song complete
-    fun playNext() {
-        val nextIndex = currentSongIndex + 1
-        if (nextIndex < MV.songs.size) {
-            playSongAt(nextIndex)
-        } else {
-            // Optional: Loop back to first song
-            // playSongAt(0)
-            currentSong = null
-        }
-    }
 
     exoPlayer = remember(context) {
         ExoPlayer.Builder(context).build().apply {
@@ -196,24 +188,9 @@ fun MusicAppUI(context: Context , navController: NavController) {
         }
     }
 
-    // Load songs
-//    LaunchedEffect(Unit) {
-//        songs.clear()
-//        songs.addAll(getAllAudioFiles(context))
-//    }
-
     // Load songs once
     LaunchedEffect(Unit) {
         MV.loadSongs(context)
-    }
-
-    // Play selected song
-    fun playSong(song: Song) {
-        currentSong = song
-        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(song.path)))
-        exoPlayer.prepare()
-        exoPlayer.play()
-
     }
 
     // Filter songs based on search text
@@ -223,59 +200,49 @@ fun MusicAppUI(context: Context , navController: NavController) {
     }
 
 
-    // Stop playback
-    fun stopSong() {
-        exoPlayer.stop()
-        currentSong = null
-    }
-
     Scaffold(
 //        Modifier.padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()),
-                topBar = {
-            TopAppBar(
+        topBar = {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp),
-                title = {
-
-                        TopBarWithImageAndSearch(
-                            searchText = searchText,
-                            onSearchTextChange = { searchText = it },
-                            navController
-                        )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1DB954),
-                    titleContentColor = Color.White
-                )
+                    .background(Color(0xFF1DB954))
+                    .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()) // for status bar space
+                    .shadow(elevation = 4.dp)
             )
-
+            {
+                TopBarWithImageAndSearch(
+                    searchText = searchText,
+                    onSearchTextChange = { searchText = it },
+                    navController = navController,
+                    value = 1
+                )
+            }
         },
-//        bottomBar = {
-//            currentSong?.let {
-//                BottomPlayer(
-//                    song = currentSong!!,
-//                    isPlaying = exoPlayer.isPlaying,
-//                    onStop = { stopSong() },
-//                    onToggle = {
-//                        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-//                    },
-//                    navController = navController,
-//                    exoPlayer = exoPlayer,
-//                )
-//            }
-//        }
-//    ) { padding ->
-//        LazyColumn(modifier = Modifier.padding(padding)) {
-//            items(filteredSongs) { song ->
-//                SongItem(song.title, song.artist) {
-//                    playSong(song)
-//                }
-//            }
-//        }
-//    }
 
-        bottomBar = {
+//                topBar = {
+//            TopAppBar(
+//                modifier = Modifier
+//                    .fillMaxWidth(),
+//                //.height(250.dp),
+//                title = {
+//
+//                    TopBarWithImageAndSearch(
+//                        searchText = searchText,
+//                        onSearchTextChange = { searchText = it },
+//                        navController,
+//                        value = 1 ,
+//                    )
+//                },
+//                colors = TopAppBarDefaults.topAppBarColors(
+//                    containerColor = Color(0xFF1DB954),
+//                    titleContentColor = Color.White
+//                )
+//            )
+//
+//        },
+
+                bottomBar = {
             MV.currentSong?.let {
                 BottomPlayer(
                     song = MV.currentSong!!,
@@ -285,7 +252,7 @@ fun MusicAppUI(context: Context , navController: NavController) {
                         if (MV.exoPlayer.isPlaying) MV.exoPlayer.pause() else MV.exoPlayer.play()
                     },
                     navController = navController,
-                    exoPlayer = MV.exoPlayer,
+
                 )
             }
         }
@@ -293,9 +260,7 @@ fun MusicAppUI(context: Context , navController: NavController) {
         LazyColumn(modifier = Modifier.padding(padding)) {
             items(filteredSongs) { song ->
                 SongItem(song.title, song.artist) {
-//                    musicViewModel.playSongAt(songs.indexOf(song))
                     MV.playSong(song)
-
                 }
             }
         }
@@ -331,7 +296,7 @@ fun SongItem(title: String, artist: String, onClick: () -> Unit) {
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column {
                 Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -342,71 +307,6 @@ fun SongItem(title: String, artist: String, onClick: () -> Unit) {
     }
     HorizontalDivider()
 }
-
-
-@Composable
-fun BottomPlayer(
-    song: Song,
-    onStop: () -> Unit,
-    isPlaying: Boolean,
-    onToggle: () -> Unit,
-    navController: NavController,
-    exoPlayer: ExoPlayer
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFFF0F0F0)) // light gray background
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-
-    ) {
-        Box(
-            modifier = Modifier
-                .size(20.dp)
-                .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.PlayArrow,
-                contentDescription = "Play",
-                tint = Color.White
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-
-            Text(
-                text = song.title,
-                fontSize = 16.sp,
-                modifier = Modifier
-                    .padding(16.dp)
-                    .clickable {
-                        val encodedTitle = Uri.encode(song.title)
-                        val encodedPath = Uri.encode(song.path)
-                        val isPlayingString = isPlaying.toString()
-
-                        navController.navigate("music/$encodedTitle/$encodedPath/$isPlayingString")
-
-                    }
-            )
-        }
-        Button(
-            onClick = onStop,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Red,
-                contentColor = Color.White
-            )
-        )
-        {
-
-            Text("Stop")
-        }
-    }
-}
-
-
 
 fun getAllAudioFiles(context: Context): List<Song> {
     val songList = mutableListOf<Song>()
@@ -443,17 +343,77 @@ fun getAllAudioFiles(context: Context): List<Song> {
 }
 
 @Composable
+fun BottomPlayer(
+    song: Song,
+    onStop: () -> Unit,
+    isPlaying: Boolean,
+    onToggle: () -> Unit,
+    navController: NavController,
+
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF0F0F0)) // light gray background
+            .clickable {
+                val encodedPath = Uri.encode(song.path)
+                navController.navigate("music/$encodedPath")
+            }
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = "Play",
+                tint = Color.White
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .padding(16.dp)
+
+                )
+        }
+        Button(
+            onClick = onStop,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.Gray,
+                contentColor = Color.White
+            )
+        )
+        {
+
+            Text("Stop")
+        }
+    }
+}
+
+@Composable
 fun TopBarWithImageAndSearch(
     searchText: String,
     onSearchTextChange: (String) -> Unit,
-    navController: NavController
+    navController: NavController,
+    value: Int = 0
 ) {
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF1DB954))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+            //.padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()), // Consider this for status bar
+        verticalArrangement = Arrangement.spacedBy(12.dp) // Add spacing between elements
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -469,110 +429,190 @@ fun TopBarWithImageAndSearch(
                         navController.navigate("home") // Navigate to home
                     }
             )
-
-
             Spacer(modifier = Modifier.width(8.dp))
 
             // Animated Typing Title
             TypingText(fullText = "My Music")
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Search Field
-        TextField(
-            value = searchText,
-            onValueChange = onSearchTextChange,
-            placeholder = { Text("Search songs...", color = Color.LightGray) },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-                .background(Color.White.copy(alpha = 0.2f), shape = RoundedCornerShape(8.dp)),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color.White.copy(alpha = 0.15f),
-                unfocusedContainerColor = Color.White.copy(alpha = 0.10f),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = Color.White,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent
-            ),
-            textStyle = LocalTextStyle.current.copy(fontSize = 14.sp)
-        )
+        if (value == 1) {
+            //Search Field
+                TextField(
+                    value = searchText,
+                    onValueChange = onSearchTextChange,
+                    placeholder = { Text("Search songs...", color = Color.LightGray  , fontSize = 13.sp) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .background(
+                            Color.White.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(10.dp)
+                        ),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.White.copy(alpha = 0.15f),
+                        unfocusedContainerColor = Color.White.copy(alpha = 0.10f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color.White,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    ),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp)
+                )
+            }
+        }
     }
-}
 
 
+@SuppressLint("UseOfNonLambdaOffsetOverload")
 @Composable
 fun PlayerUI(
     navController: NavController,
-    songTitle: String,
     songPath: String,
     exoPlayer: ExoPlayer,
-    isPlayingM: Boolean,
+    VM: MusicViewModel
 ) {
+//    val isPlaying by rememberUpdatedState(newValue = VM.exoPlayer.isPlaying)
     var isPlaying by remember { mutableStateOf(false) }
+    isPlaying = VM.exoPlayer.isPlaying
+
     var currentPosition by remember { mutableFloatStateOf(0f) }
+    //currentPosition = VM.exoPlayer.currentPosition.toFloat()
+
     var songDuration by remember { mutableFloatStateOf(1f) }
 
     // Prepare and observe the player
+
     LaunchedEffect(songPath) {
-        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(songPath)))
-        exoPlayer.prepare()
-        exoPlayer.addListener(object : Player.Listener {
+        VM.exoPlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) {
-                    songDuration = exoPlayer.duration.coerceAtLeast(1).toFloat()
+                if (state == Player.STATE_READY && VM.exoPlayer.duration > 0) {
+                    songDuration = VM.exoPlayer.duration.toFloat() / 1000f
                 }
             }
         })
 
+        VM.exoPlayer.playWhenReady = true // optional autoplay
+
         while (true) {
-            currentPosition = exoPlayer.currentPosition / 1000f
-            delay(1000)
+            if (VM.exoPlayer.isPlaying && VM.exoPlayer.duration > 0) {
+                currentPosition = VM.exoPlayer.currentPosition.toFloat() / 1000f
+                songDuration = VM.exoPlayer.duration.toFloat() / 1000f
+            }
+            delay(500) // smooth updates
         }
+    }
+    val animatedOffset = remember { Animatable(-300f) }
+
+    LaunchedEffect(Unit) {
+        animatedOffset.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
+        )
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            exoPlayer.release()
+//            VM.exoPlayer.release()
         }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        colorResource(id = R.color.PlayerBack),
+                        Color.Blue.copy(alpha = 0.3f)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.BottomEnd
+    ){
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Transparent),
+            contentAlignment = Alignment.Center // This centers the content (Image) inside the Box
+        ) {
+//            val context = LocalContext.current
+//            val thumbnailUri = getAlbumArtUri(context, Uri.parse(VM.exoPlayer.Song.path))
+//
+//
+//            if (thumbnailUri != null) {
+//                Image(
+//                    painter = rememberAsyncImagePainter(model = thumbnailUri ?: R.drawable.placeholder),
+//                    contentDescription = "Song Thumbnail",
+//                    modifier = Modifier
+//                        .fillMaxSize()
+//                        .clip(RoundedCornerShape(16.dp))
+////                        .shadow(8.dp)
+//                )
+//            }
+
+            if (isPlaying) RotatingDiskImage()
+            else RotatingDiskImage(200000)
+
+
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight()
-                .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(16.dp))
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Song Title
-            Text(
-                text = songTitle,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic
-                ),
-                textAlign = TextAlign.Center
-            )
+            VM.currentSong?.let {
+                Box(
+                    modifier = Modifier
+                        .offset(y = animatedOffset.value.dp)
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = (it.title),
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontStyle = FontStyle.Italic,
+                            shadow = Shadow(
+                                color = Color.Black,
+                                offset = Offset(2f, 2f),
+                                blurRadius = 4f
+                            )
+                        ),
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            val safeDuration = songDuration.takeIf { it > 0f && it.isFinite() } ?: 1f
+
             // Slider for song position
             Slider(
-                value = currentPosition.coerceIn(0f, songDuration),
-                onValueChange = { exoPlayer.seekTo((it * 1000).toLong()) },
-                valueRange = 0f..songDuration,
-                modifier = Modifier.fillMaxWidth()
+                value = currentPosition.coerceIn(0f, safeDuration),
+                onValueChange = { VM.exoPlayer.seekTo((it * 1000).toLong()) }, // convert back to ms
+                valueRange = 0f..safeDuration,
+                colors = SliderDefaults.colors(
+                    thumbColor = colorResource(id = R.color.LightGreen),
+                    activeTrackColor = Color.Green,
+                    inactiveTrackColor = Color.Gray // Optional
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = Color.DarkGray,
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+
             )
 
             // Time indicators
@@ -580,8 +620,8 @@ fun PlayerUI(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = formatTime(currentPosition.toLong()))
-                Text(text = formatTime(songDuration.toLong()))
+                Text(text = formatTime(currentPosition))
+                Text(text = formatTime(songDuration))
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -591,13 +631,14 @@ fun PlayerUI(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                IconButton(onClick = { exoPlayer.seekTo(0) }) {
+                IconButton(onClick = { VM.playPrevious() }) {
                     Icon(imageVector = Icons.Filled.SkipPrevious,
                         contentDescription = "Previous")
                 }
 
                 IconButton(onClick = {
-                    if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                    if (isPlaying) VM.exoPlayer.pause()
+                    else VM.exoPlayer.play()
                     isPlaying = !isPlaying
                 }) {
                     Icon(
@@ -607,21 +648,55 @@ fun PlayerUI(
                     )
                 }
 
-                IconButton(onClick = { exoPlayer.seekToNext() }) {
+                IconButton(onClick = { VM.playNext() }) {
                     Icon(imageVector = Icons.Filled.SkipNext, contentDescription = "Next")
                 }
             }
         }
     }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF1DB954))
+            .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()) // for status bar space
+            .shadow(elevation = 4.dp)
+    )
+    {
+        TopBarWithImageAndSearch(
+            searchText = "",
+            onSearchTextChange = {  },
+            navController = navController,
+        )
+    }
+
+
+
 }
 
 
 @SuppressLint("DefaultLocale")
-fun formatTime(timeInSeconds: Long): String {
-    val minutes = timeInSeconds / 60
-    val seconds = timeInSeconds % 60
+fun formatTime(timeInSeconds: Float): String {
+    val totalSeconds = timeInSeconds.toInt()
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
     return String.format("%02d:%02d", minutes, seconds)
 }
+
+// Future use  FUN
+
+fun getAlbumArtUri(context: Context, audioUri: Uri): Uri? {
+    val projection = arrayOf(MediaStore.Audio.Media.ALBUM_ID)
+    val cursor = context.contentResolver.query(audioUri, projection, null, null, null)
+
+    cursor?.use {
+        if (it.moveToFirst()) {
+            val albumId = it.getLong(it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID))
+            return Uri.parse("content://media/external/audio/albumart/$albumId")
+        }
+    }
+    return null
+}
+
 
 // Animation
 @Composable
@@ -659,8 +734,53 @@ fun TypingText(
     Text(
         text = displayedText,
         color = Color.White,
-        style = MaterialTheme.typography.titleLarge
+        style = MaterialTheme.typography.headlineMedium.copy(
+            fontSize = 18.sp, // slightly bigger for better readability
+            fontWeight = FontWeight.Bold,
+            fontStyle = FontStyle.Italic,
+            shadow = Shadow(
+                color = Color.Black,
+                offset = Offset(2f, 2f),
+                blurRadius = 4f
+            )
+        ),
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
 }
 
+@Composable
+fun RotatingDiskImage(value : Int = 8000) {
+    // Animate rotation angle from 0 to 360 and loop infinitely
+    val infiniteTransition = rememberInfiniteTransition()
+    var time_to_one_round = value
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = time_to_one_round, easing = LinearEasing), // 5 seconds full rotation
+            repeatMode = RepeatMode.Restart
+        )
+    )
 
+    Box(
+        modifier = Modifier
+            .size(500.dp) // Box size
+            .background(Color.Transparent), // Optional: Transparent background for image
+        contentAlignment = Alignment.Center // Center the image
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.disk),
+            contentDescription = "Disk Image",
+            modifier = Modifier
+                .size(400.dp)
+                .background(Color.Transparent)
+                .graphicsLayer {
+                    rotationZ = rotationAngle
+                    shadowElevation = 16f // adds a soft shadow
+                    shape = CircleShape      // optional, makes shadow round
+                    clip = true              // if you want to clip the image to the shape
+                },
+        )
+    }
+}
