@@ -6,7 +6,9 @@
     <!-- For older Android versions -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- For background operation -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
 
     <application
