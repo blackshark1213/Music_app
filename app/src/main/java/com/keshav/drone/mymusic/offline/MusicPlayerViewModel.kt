@@ -71,6 +71,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Play the next song
+    fun playPrevious() {
+        val nextIndex = currentSongIndex - 1
+        if (nextIndex < songs.size) {
+            playSongAt(nextIndex)
+        } else {
+            currentSong = null
+            exoPlayer.seekTo(0) // Optionally loop to start
+            exoPlayer.pause()
+        }
+    }
+
     // Stop the player
     fun stopPlayer() {
         exoPlayer.stop()
