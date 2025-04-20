@@ -2,6 +2,7 @@ package com.keshav.drone.mymusic.offline
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Context
 import android.media.Image
 import android.os.Build
@@ -34,6 +35,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.core.app.ActivityCompat
 
 import android.net.Uri
+import android.window.OnBackInvokedDispatcher
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -74,15 +76,21 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.text.style.TextOverflow
+
 //import coil.compose.rememberAsyncImagePainter
 
 
@@ -119,6 +127,19 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
     }
+
+
+//    override fun onBackPressed() {
+//        super.onBackPressed()
+//        // Prevent exiting immediately
+//        AlertDialog.Builder(this)
+//            .setTitle("Exit App?")
+//            .setMessage("Are you sure you want to exit?")
+//            .setPositiveButton("Yes") { _, _ -> finish() }
+//            .setNegativeButton("No", null)
+//            .show()
+//    }
+
 }
 
 data class Song(
@@ -162,8 +183,6 @@ fun MyAppNavigation(musicViewModel: MusicViewModel) {
 @Composable
 fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewModel) {
 
-    // Get ViewModel
-//    val MV: MusicViewModel = viewModel()
     var searchText by remember { mutableStateOf("") }
 
     lateinit var exoPlayer: ExoPlayer
@@ -181,7 +200,6 @@ fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewMod
         }
     }
 
-
     DisposableEffect(Unit) {
         onDispose {
             exoPlayer.release()
@@ -198,6 +216,10 @@ fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewMod
         it.title.contains(searchText, ignoreCase = true) ||
                 it.artist.contains(searchText, ignoreCase = true)
     }
+    val isDarkTheme = isSystemInDarkTheme()
+    val backgroundColor = if (isDarkTheme) Color.Black else Color.White
+    val textColor = if (isDarkTheme) Color.White else Color.Black
+    val Background = if (isDarkTheme) Color.DarkGray else Color(0xFFF0F0F0)
 
 
     Scaffold(
@@ -241,25 +263,25 @@ fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewMod
 //            )
 //
 //        },
-
                 bottomBar = {
             MV.currentSong?.let {
                 BottomPlayer(
                     song = MV.currentSong!!,
-                    isPlaying = MV.exoPlayer.isPlaying,
-                    onStop = { MV.stopPlayer() },
-                    onToggle = {
-                        if (MV.exoPlayer.isPlaying) MV.exoPlayer.pause() else MV.exoPlayer.play()
-                    },
+//                    onToggle = {
+//                        if (MV.exoPlayer.isPlaying) MV.exoPlayer.pause() else MV.exoPlayer.play()
+//                    },
                     navController = navController,
-
+                    VM = MV,
+                    textcolor = textColor,
+                    bg = Background,
                 )
             }
         }
     ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
+        LazyColumn(modifier = Modifier.padding(padding) .background(backgroundColor)) {
             items(filteredSongs) { song ->
-                SongItem(song.title, song.artist) {
+                SongItem(song.title, song.artist ,textColor , MV) {
+                    MV.currentSongIndex = filteredSongs.indexOf(song)
                     MV.playSong(song)
                 }
             }
@@ -270,12 +292,13 @@ fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewMod
 
 
 @Composable
-fun SongItem(title: String, artist: String, onClick: () -> Unit) {
+fun SongItem(title: String, artist: String, textcolor : Color, MV: MusicViewModel ,onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(16.dp)
+
     ) {
         Row(
             modifier = Modifier
@@ -283,27 +306,87 @@ fun SongItem(title: String, artist: String, onClick: () -> Unit) {
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Play",
-                    tint = Color.White
-                )
-            }
+            if (title == MV.currentSong?.title){
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .padding(3.dp)
+                        .background(Color(0xFFEA9240), shape = MaterialTheme.shapes.small),
 
-            Spacer(modifier = Modifier.width(10.dp))
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.DarkGray
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
 
-            Column {
-                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text(text = artist, fontSize = 12.sp, color = Color.Gray)
+                Column {
+                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = colorResource(R.color.LightGreen))
+                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
+                }
             }
+            else{
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column {
+                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = textcolor)
+                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
+                }
+            }
+//            Box(
+//                modifier = Modifier
+//                    .size(30.dp)
+//                    .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
+//                contentAlignment = Alignment.Center
+//            ) {
+//                if (title == MV.currentSong?.title){
+//                    Icon(
+//                        imageVector = Icons.Default.PlayArrow,
+//                        contentDescription = "Play",
+//                        tint = Color.DarkGray
+//                    )
+//                }
+//                else{
+//                    Icon(
+//                        imageVector = Icons.Default.PlayArrow,
+//                        contentDescription = "Play",
+//                        tint = Color.White
+//                    )
+//                }
+//
+//            }
+
+//            Spacer(modifier = Modifier.width(10.dp))
+//            if (title == MV.currentSong?.title){
+//
+//                Column {
+//                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = colorResource(R.color.LightGreen))
+//                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
+//                }
+//            }
+//            else{
+//                Column {
+//                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = textcolor)
+//                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
+//                }
+//            }
+
         }
-
     }
     HorizontalDivider()
 }
@@ -345,16 +428,29 @@ fun getAllAudioFiles(context: Context): List<Song> {
 @Composable
 fun BottomPlayer(
     song: Song,
-    onStop: () -> Unit,
-    isPlaying: Boolean,
-    onToggle: () -> Unit,
     navController: NavController,
-
+    VM: MusicViewModel,
+    textcolor: Color,
+    bg : Color,
 ) {
+    val exoPlayer = VM.exoPlayer
+    var isPlaying by remember { mutableStateOf(VM.exoPlayer.isPlaying) }
+
+//     Keep isPlaying in sync with ExoPlayer state
+    LaunchedEffect(Unit) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playWhenReady: Boolean) {
+                isPlaying = exoPlayer.isPlaying
+            }
+        }
+        exoPlayer.addListener(listener)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFFF0F0F0)) // light gray background
+            //.background(Color.DarkGray)
+            .background(bg)
             .clickable {
                 val encodedPath = Uri.encode(song.path)
                 navController.navigate("music/$encodedPath")
@@ -378,25 +474,58 @@ fun BottomPlayer(
         }
 
         Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = song.title,
-                    fontSize = 16.sp,
-                    modifier = Modifier
-                        .padding(16.dp)
 
-                )
-        }
-        Button(
-            onClick = onStop,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Gray,
-                contentColor = Color.White
+            MarqueeText(
+                text = song.title,
+                textcolor = textcolor,
             )
-        )
-        {
 
-            Text("Stop")
+//            Text(
+//                text = song.title,
+//                color = Color.White,
+//                fontSize = 16.sp,
+//                maxLines = 1,
+//                overflow = TextOverflow.Ellipsis
+//            )
+
         }
+
+        IconButton(onClick = { VM.playPrevious() }) {
+            Icon(
+                imageVector = Icons.Filled.SkipPrevious,
+                contentDescription = "Previous",
+                tint = textcolor
+            )
+        }
+
+        IconButton(onClick = {
+            if (isPlaying) exoPlayer.pause()
+            else exoPlayer.play()
+        }) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = "Play/Pause",
+                modifier = Modifier.size(48.dp),
+                tint = textcolor
+            )
+        }
+
+        IconButton(onClick = { VM.playNext() }) {
+            Icon(
+                imageVector = Icons.Filled.SkipNext,
+                contentDescription = "Next",
+                tint = textcolor
+            )
+        }
+
+        IconButton(onClick = { VM.stopPlayer() }) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Close",
+                tint = textcolor
+            )
+        }
+
     }
 }
 
@@ -669,8 +798,6 @@ fun PlayerUI(
         )
     }
 
-
-
 }
 
 
@@ -699,6 +826,39 @@ fun getAlbumArtUri(context: Context, audioUri: Uri): Uri? {
 
 
 // Animation
+
+@Composable
+fun MarqueeText(text: String , textcolor: Color) {
+    val scrollState = rememberScrollState()
+
+    // Scroll animation loop
+    LaunchedEffect(Unit) {
+        while (true) {
+            scrollState.animateScrollTo(scrollState.maxValue, animationSpec = tween(5000))
+            delay(3000)
+            scrollState.scrollTo(0)
+            delay(5000)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .horizontalScroll(scrollState, enabled = false)
+            .clipToBounds()
+    ) {
+        Text(
+            text = text,
+            color = textcolor,
+            fontSize = 16.sp,
+            maxLines = 1,
+            modifier = Modifier
+                .padding(12.dp)
+        )
+    }
+}
+
+
+
 @Composable
 fun TypingText(
     fullText: String,
