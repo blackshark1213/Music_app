@@ -2,9 +2,10 @@ package com.keshav.drone.mymusic.offline
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.AlertDialog
+import android.app.Activity
+import android.content.ContentUris
 import android.content.Context
-import android.media.Image
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -28,15 +29,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.core.app.ActivityCompat
 
 import android.net.Uri
-import android.window.OnBackInvokedDispatcher
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,11 +43,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.res.painterResource
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.navigation.compose.NavHost
@@ -68,53 +63,57 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.SliderColors
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.colorResource
-import androidx.compose.ui.text.style.TextOverflow
 
-//import coil.compose.rememberAsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
+
         setContent {
-//            MusicAppUI(this)
 
             // Declare ViewModel scoped to the activity
             val musicViewModel: MusicViewModel = viewModel()
 
             // Pass it to NavHost
             MyAppNavigation(musicViewModel)
-            //MyAppNavigation()
         }
         requestStoragePermission()
 
     }
+    override fun onDestroy() {
+        super.onDestroy()
+//        unregisterReceiver(playbackReceiver)
+    }
     private fun requestStoragePermission() {
+
+
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
         } else {
@@ -145,7 +144,8 @@ class MainActivity : ComponentActivity() {
 data class Song(
     val title: String,
     val artist: String,
-    val path: String
+    val path: String,
+    val thumbnail: String,
 )
 
 @Composable
@@ -160,6 +160,7 @@ fun MyAppNavigation(musicViewModel: MusicViewModel) {
 
         composable("music/{path}") { backStackEntry ->
             val songPath = backStackEntry.arguments?.getString("songPath")
+            //val thumbnail = backStackEntry.arguments?.getString("thumb")
 //            val isPlaying = backStackEntry.arguments?.getString("isPlaying")?.toBoolean() ?: false
             val context = LocalContext.current
 
@@ -174,131 +175,122 @@ fun MyAppNavigation(musicViewModel: MusicViewModel) {
                 VM = musicViewModel,
             )
         }
-
     }
-
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+
 @Composable
-fun MusicAppUI(context: Context , navController: NavController, MV: MusicViewModel) {
-
+fun MusicAppUI(context: Context, navController: NavController, MV: MusicViewModel) {
     var searchText by remember { mutableStateOf("") }
-
-    lateinit var exoPlayer: ExoPlayer
-
-
-    exoPlayer = remember(context) {
-        ExoPlayer.Builder(context).build().apply {
-            addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED) {
-                        MV.playNext()
-                    }
-                }
-            })
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
-        }
-    }
 
     // Load songs once
     LaunchedEffect(Unit) {
         MV.loadSongs(context)
     }
 
-    // Filter songs based on search text
+    // Filter songs
     val filteredSongs = MV.songs.filter {
         it.title.contains(searchText, ignoreCase = true) ||
                 it.artist.contains(searchText, ignoreCase = true)
     }
+
     val isDarkTheme = isSystemInDarkTheme()
     val backgroundColor = if (isDarkTheme) Color.Black else Color.White
     val textColor = if (isDarkTheme) Color.White else Color.Black
     val Background = if (isDarkTheme) Color.DarkGray else Color(0xFFF0F0F0)
+    var showLikedSongs by remember { mutableStateOf(false) }
 
+    // Gesture detection wrapper
 
-    Scaffold(
-//        Modifier.padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()),
-        topBar = {
+        Scaffold(
+            topBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF1DB954))
+                        .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                        .shadow(elevation = 4.dp)
+                ) {
+                    TopBarWithImageAndSearch(
+                        searchText = searchText,
+                        onSearchTextChange = { searchText = it },
+                        navController = navController,
+                        value = 1,
+                        MV = MV,
+                    )
+                }
+            },
+            bottomBar = {
+                MV.currentSong?.let {
+                    BottomPlayer(
+                        song = it,
+                        navController = navController,
+                        VM = MV,
+                        textcolor = textColor,
+                        bg = Background,
+                    )
+                }
+            }
+        ) { padding ->
+
+            // Handle swipe gestures
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1DB954))
-                    .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()) // for status bar space
-                    .shadow(elevation = 4.dp)
-            )
-            {
-                TopBarWithImageAndSearch(
-                    searchText = searchText,
-                    onSearchTextChange = { searchText = it },
-                    navController = navController,
-                    value = 1
-                )
-            }
-        },
+                    .fillMaxSize()
+                    .background(backgroundColor)
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures { _, dragAmount ->
+                            if (dragAmount < -100) {
+                                showLikedSongs = true
+                            } else if (dragAmount > 100) {
+                                (context as? Activity)?.finish()
+                            }
+                        }
+                    }
+            ) {
+                if (showLikedSongs) {
+                    LikedSongsUI(MV)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .padding(padding)
+                            .fillMaxSize()
+                            .background(backgroundColor)
+                    ) {
+                        items(filteredSongs)
+                        { song ->
+                            SongItem(song.title, song.artist, textColor, song.thumbnail, MV) {
+                                MV.currentSongIndex = filteredSongs.indexOf(song)
+                                MV.playSong(song)
+                            }
 
-//                topBar = {
-//            TopAppBar(
-//                modifier = Modifier
-//                    .fillMaxWidth(),
-//                //.height(250.dp),
-//                title = {
-//
-//                    TopBarWithImageAndSearch(
-//                        searchText = searchText,
-//                        onSearchTextChange = { searchText = it },
-//                        navController,
-//                        value = 1 ,
-//                    )
-//                },
-//                colors = TopAppBarDefaults.topAppBarColors(
-//                    containerColor = Color(0xFF1DB954),
-//                    titleContentColor = Color.White
-//                )
-//            )
-//
-//        },
-                bottomBar = {
-            MV.currentSong?.let {
-                BottomPlayer(
-                    song = MV.currentSong!!,
-//                    onToggle = {
-//                        if (MV.exoPlayer.isPlaying) MV.exoPlayer.pause() else MV.exoPlayer.play()
-//                    },
-                    navController = navController,
-                    VM = MV,
-                    textcolor = textColor,
-                    bg = Background,
-                )
-            }
-        }
-    ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding) .background(backgroundColor)) {
-            items(filteredSongs) { song ->
-                SongItem(song.title, song.artist ,textColor , MV) {
-                    MV.currentSongIndex = filteredSongs.indexOf(song)
-                    MV.playSong(song)
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
+     }
 
 
 @Composable
-fun SongItem(title: String, artist: String, textcolor : Color, MV: MusicViewModel ,onClick: () -> Unit) {
+fun SongItem(
+    title: String,
+    artist: String,
+    textColor: Color,
+    thumbnail: String?,   // 🔥 New Parameter
+    MV: MusicViewModel,
+    onClick: () -> Unit
+) {
+    val isPlaying = title == MV.currentSong?.title
+
+    val iconTint = if (isPlaying) Color.DarkGray else Color.White
+    val titleColor = if (isPlaying) colorResource(id = R.color.LightGreen) else textColor
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(16.dp)
-
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Row(
             modifier = Modifier
@@ -306,124 +298,119 @@ fun SongItem(title: String, artist: String, textcolor : Color, MV: MusicViewMode
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (title == MV.currentSong?.title){
-                Box(
+
+            // 🔥 Thumbnail Image
+            if (thumbnail != null) {
+                Image(
+                    painter = rememberAsyncImagePainter(
+                        model = thumbnail,
+                        placeholder = painterResource(id = R.drawable.disk) // fallback image if loading fails
+                    ),
+                    contentDescription = "Album Art",
                     modifier = Modifier
                         .size(30.dp)
-                        .padding(3.dp)
-                        .background(Color(0xFFEA9240), shape = MaterialTheme.shapes.small),
-
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.DarkGray
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column {
-                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = colorResource(R.color.LightGreen))
-                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
-                }
-            }
-            else{
-                Box(
+                        .padding(1.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(Color.DarkGray),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                // 🔥 If no thumbnail, show default disk
+                Image(
+                   // painter = Icons.Default.PlayArrow,
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Default Album Art",
                     modifier = Modifier
                         .size(30.dp)
                         .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.White
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column {
-                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = textcolor)
-                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
-                }
+                    contentScale = ContentScale.Crop
+                )
             }
-//            Box(
-//                modifier = Modifier
-//                    .size(30.dp)
-//                    .background(Color(0xFF1DB954), shape = MaterialTheme.shapes.small),
-//                contentAlignment = Alignment.Center
-//            ) {
-//                if (title == MV.currentSong?.title){
-//                    Icon(
-//                        imageVector = Icons.Default.PlayArrow,
-//                        contentDescription = "Play",
-//                        tint = Color.DarkGray
-//                    )
-//                }
-//                else{
-//                    Icon(
-//                        imageVector = Icons.Default.PlayArrow,
-//                        contentDescription = "Play",
-//                        tint = Color.White
-//                    )
-//                }
-//
-//            }
 
-//            Spacer(modifier = Modifier.width(10.dp))
-//            if (title == MV.currentSong?.title){
-//
-//                Column {
-//                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = colorResource(R.color.LightGreen))
-//                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
-//                }
-//            }
-//            else{
-//                Column {
-//                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold , color = textcolor)
-//                    Text(text = artist, fontSize = 12.sp, color = Color.Gray)
-//                }
-//            }
+            Spacer(modifier = Modifier.width(10.dp))
 
+            Column(
+                modifier = Modifier.weight(1f)  // so text doesn't overflow
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = titleColor
+                )
+                Text(
+                    text = artist,
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+            }
+
+            // 🔥 Play Icon (right side)
+            Box(
+                modifier = Modifier
+                    .size(30.dp),
+                    //.background(boxColor, shape = MaterialTheme.shapes.small),
+
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Play",
+                    tint = iconTint
+                )
+            }
         }
     }
+
     HorizontalDivider()
 }
+
 
 fun getAllAudioFiles(context: Context): List<Song> {
     val songList = mutableListOf<Song>()
     val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
 
     val projection = arrayOf(
+        MediaStore.Audio.Media._ID,     // Add ID
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST,
+        MediaStore.Audio.Media.ALBUM_ID, // Add Album ID
         MediaStore.Audio.Media.DATA
     )
 
     val cursor = context.contentResolver.query(
-        uri, projection,
+        uri,
+        projection,
         "${MediaStore.Audio.Media.IS_MUSIC} != 0",
         null,
-        MediaStore.Audio.Media.TITLE + " ASC"
+        "${MediaStore.Audio.Media.TITLE} ASC"
     )
 
     cursor?.use {
+        val idIndex = it.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         val titleIndex = it.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
         val artistIndex = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+        val albumIdIndex = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
         val dataIndex = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
         while (it.moveToNext()) {
+            val id = it.getLong(idIndex)
             val title = it.getString(titleIndex)
             val artist = it.getString(artistIndex)
+            val albumId = it.getLong(albumIdIndex)
             val data = it.getString(dataIndex)
 
-            songList.add(Song(title, artist, data))
+            // Build the album art URI
+            val albumArtUri = Uri.parse("content://media/external/audio/albumart")
+            val thumbnailUri = ContentUris.withAppendedId(albumArtUri, albumId)
+
+            songList.add(Song(title, artist, data, thumbnail = thumbnailUri.toString()))
         }
     }
 
     return songList
 }
+
 
 @Composable
 fun BottomPlayer(
@@ -449,10 +436,12 @@ fun BottomPlayer(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFFF0F0F0)) // light gray background
-            //.background(Color.DarkGray)
             .background(bg)
             .clickable {
                 val encodedPath = Uri.encode(song.path)
+                //val thumbnail = Uri.encode(song.thumbnail)
+                VM.current_thumbnail =  song.thumbnail
+
                 navController.navigate("music/$encodedPath")
             }
             .padding(16.dp),
@@ -479,6 +468,7 @@ fun BottomPlayer(
                 text = song.title,
                 textcolor = textcolor,
             )
+            //TypingText(song.title)
 
 //            Text(
 //                text = song.title,
@@ -529,12 +519,14 @@ fun BottomPlayer(
     }
 }
 
+
 @Composable
 fun TopBarWithImageAndSearch(
     searchText: String,
     onSearchTextChange: (String) -> Unit,
     navController: NavController,
-    value: Int = 0
+    value: Int = 0,
+    MV: MusicViewModel,
 ) {
     Column(
         modifier = Modifier
@@ -562,6 +554,55 @@ fun TopBarWithImageAndSearch(
 
             // Animated Typing Title
             TypingText(fullText = "My Music")
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+
+                val context = LocalContext.current
+                val isMainActivity = context is MainActivity
+                var currentActivity : String = ""
+                var text = "-"
+
+                if (isMainActivity) {
+                    text = "Go online"
+
+                    currentActivity = "MainActivityOnline"
+                } else {
+                    text = "Go offline"
+
+                        currentActivity = "MainActivity"
+                }
+
+                Button(onClick = {
+                    val targetActivity = when (currentActivity) {
+                        "MainActivity" -> MainActivity::class.java
+                        "MainActivityOnline" -> MainActivityOnline::class.java
+                        else -> MainActivity::class.java
+                    }
+                        MV.exoPlayer.stop()
+                        //MV.exoPlayer.release()
+
+                    val intent = Intent(context, targetActivity)
+                    context.startActivity(intent)
+                },
+                    modifier = Modifier
+                        .padding(8.dp)
+                    ,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF45D278),
+                        contentColor = Color.White
+                    )
+
+                ) {
+                    Text(text)
+                }
+            }
+
+
         }
 
         if (value == 1) {
@@ -592,213 +633,6 @@ fun TopBarWithImageAndSearch(
             }
         }
     }
-
-
-@SuppressLint("UseOfNonLambdaOffsetOverload")
-@Composable
-fun PlayerUI(
-    navController: NavController,
-    songPath: String,
-    exoPlayer: ExoPlayer,
-    VM: MusicViewModel
-) {
-//    val isPlaying by rememberUpdatedState(newValue = VM.exoPlayer.isPlaying)
-    var isPlaying by remember { mutableStateOf(false) }
-    isPlaying = VM.exoPlayer.isPlaying
-
-    var currentPosition by remember { mutableFloatStateOf(0f) }
-    //currentPosition = VM.exoPlayer.currentPosition.toFloat()
-
-    var songDuration by remember { mutableFloatStateOf(1f) }
-
-    // Prepare and observe the player
-
-    LaunchedEffect(songPath) {
-        VM.exoPlayer.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY && VM.exoPlayer.duration > 0) {
-                    songDuration = VM.exoPlayer.duration.toFloat() / 1000f
-                }
-            }
-        })
-
-        VM.exoPlayer.playWhenReady = true // optional autoplay
-
-        while (true) {
-            if (VM.exoPlayer.isPlaying && VM.exoPlayer.duration > 0) {
-                currentPosition = VM.exoPlayer.currentPosition.toFloat() / 1000f
-                songDuration = VM.exoPlayer.duration.toFloat() / 1000f
-            }
-            delay(500) // smooth updates
-        }
-    }
-    val animatedOffset = remember { Animatable(-300f) }
-
-    LaunchedEffect(Unit) {
-        animatedOffset.animateTo(
-            targetValue = 0f,
-            animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
-        )
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-//            VM.exoPlayer.release()
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        colorResource(id = R.color.PlayerBack),
-                        Color.Blue.copy(alpha = 0.3f)
-                    )
-                )
-            ),
-        contentAlignment = Alignment.BottomEnd
-    ){
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Transparent),
-            contentAlignment = Alignment.Center // This centers the content (Image) inside the Box
-        ) {
-//            val context = LocalContext.current
-//            val thumbnailUri = getAlbumArtUri(context, Uri.parse(VM.exoPlayer.Song.path))
-//
-//
-//            if (thumbnailUri != null) {
-//                Image(
-//                    painter = rememberAsyncImagePainter(model = thumbnailUri ?: R.drawable.placeholder),
-//                    contentDescription = "Song Thumbnail",
-//                    modifier = Modifier
-//                        .fillMaxSize()
-//                        .clip(RoundedCornerShape(16.dp))
-////                        .shadow(8.dp)
-//                )
-//            }
-
-            if (isPlaying) RotatingDiskImage()
-            else RotatingDiskImage(200000)
-
-
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .wrapContentHeight()
-                .background(MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(16.dp))
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Song Title
-            VM.currentSong?.let {
-                Box(
-                    modifier = Modifier
-                        .offset(y = animatedOffset.value.dp)
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = (it.title),
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontStyle = FontStyle.Italic,
-                            shadow = Shadow(
-                                color = Color.Black,
-                                offset = Offset(2f, 2f),
-                                blurRadius = 4f
-                            )
-                        ),
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            val safeDuration = songDuration.takeIf { it > 0f && it.isFinite() } ?: 1f
-
-            // Slider for song position
-            Slider(
-                value = currentPosition.coerceIn(0f, safeDuration),
-                onValueChange = { VM.exoPlayer.seekTo((it * 1000).toLong()) }, // convert back to ms
-                valueRange = 0f..safeDuration,
-                colors = SliderDefaults.colors(
-                    thumbColor = colorResource(id = R.color.LightGreen),
-                    activeTrackColor = Color.Green,
-                    inactiveTrackColor = Color.Gray // Optional
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = Color.DarkGray,
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                    .clip(RoundedCornerShape(24.dp))
-
-            )
-
-            // Time indicators
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(text = formatTime(currentPosition))
-                Text(text = formatTime(songDuration))
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Control buttons
-            Row(
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                IconButton(onClick = { VM.playPrevious() }) {
-                    Icon(imageVector = Icons.Filled.SkipPrevious,
-                        contentDescription = "Previous")
-                }
-
-                IconButton(onClick = {
-                    if (isPlaying) VM.exoPlayer.pause()
-                    else VM.exoPlayer.play()
-                    isPlaying = !isPlaying
-                }) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = "Play/Pause",
-                        modifier = Modifier.size(48.dp)
-                    )
-                }
-
-                IconButton(onClick = { VM.playNext() }) {
-                    Icon(imageVector = Icons.Filled.SkipNext, contentDescription = "Next")
-                }
-            }
-        }
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1DB954))
-            .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()) // for status bar space
-            .shadow(elevation = 4.dp)
-    )
-    {
-        TopBarWithImageAndSearch(
-            searchText = "",
-            onSearchTextChange = {  },
-            navController = navController,
-        )
-    }
-
-}
 
 
 @SuppressLint("DefaultLocale")
@@ -846,18 +680,29 @@ fun MarqueeText(text: String , textcolor: Color) {
             .horizontalScroll(scrollState, enabled = false)
             .clipToBounds()
     ) {
-        Text(
-            text = text,
-            color = textcolor,
-            fontSize = 16.sp,
-            maxLines = 1,
-            modifier = Modifier
-                .padding(12.dp)
-        )
+        AnimatedVisibility(
+            visible = true,  // Set this to your condition for visibility
+            enter = fadeIn(tween(durationMillis = 1000)),  // Fade-in effect
+            exit = fadeOut(tween(durationMillis = 1000))   // Fade-out effect
+        ) {
+            Text(
+                text = text,
+                color = textcolor,
+                fontSize = 16.sp,
+                maxLines = 1,
+                modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.Thin,
+                            shadow = Shadow(
+                                color = Color.Black,
+                                offset = Offset(2f, 2f),
+                                blurRadius = 4f
+                            )
+                        )
+            )
+        }
     }
 }
-
-
 
 @Composable
 fun TypingText(
@@ -910,34 +755,34 @@ fun TypingText(
 }
 
 @Composable
-fun RotatingDiskImage(value : Int = 8000) {
+fun RotatingDiskImage(value : Int = 20000 ) {
     // Animate rotation angle from 0 to 360 and loop infinitely
     val infiniteTransition = rememberInfiniteTransition()
     var time_to_one_round = value
-    val rotationAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = time_to_one_round, easing = LinearEasing), // 5 seconds full rotation
-            repeatMode = RepeatMode.Restart
+       val rotationAngle by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = time_to_one_round, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            )
         )
-    )
 
     Box(
         modifier = Modifier
             .size(500.dp) // Box size
-            .background(Color.Transparent), // Optional: Transparent background for image
+            .background(Color.Transparent),
         contentAlignment = Alignment.Center // Center the image
     ) {
         Image(
             painter = painterResource(id = R.drawable.disk),
             contentDescription = "Disk Image",
             modifier = Modifier
-                .size(400.dp)
+                .size(250.dp)
                 .background(Color.Transparent)
                 .graphicsLayer {
                     rotationZ = rotationAngle
-                    shadowElevation = 16f // adds a soft shadow
+                   shadowElevation = 16f // adds a soft shadow
                     shape = CircleShape      // optional, makes shadow round
                     clip = true              // if you want to clip the image to the shape
                 },
