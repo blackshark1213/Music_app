@@ -66,6 +66,15 @@ dependencies {
     implementation ("androidx.media3:media3-exoplayer:1.2.0")
     implementation ("androidx.media3:media3-exoplayer:1.0.0") // or latest version
     implementation ("androidx.media3:media3-ui:1.0.0") // if using UI components
+  implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+
+    implementation ("com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.0")
+    implementation ("androidx.media:media:1.6.0")
+    implementation ("androidx.core:core-ktx:1.12.0")
+    implementation("io.coil-kt:coil-compose:2.2.2")
+    implementation ("io.coil-kt:coil-compose:2.2.2")
+
 
 
 }
