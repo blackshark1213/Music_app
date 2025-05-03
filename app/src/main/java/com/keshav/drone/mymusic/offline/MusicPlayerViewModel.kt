@@ -7,7 +7,7 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.PlaybackException // Correct import
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 
 
@@ -19,6 +19,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     var currentSong by mutableStateOf<Song?>(null)
     var currentSongIndex by mutableStateOf(0)
     val songs = mutableStateListOf<Song>()
+    var current_thumbnail: String = ""
+
 
     init {
         // Adding listener to ExoPlayer
@@ -61,7 +63,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // Play the next song
     fun playNext() {
+
         val nextIndex = currentSongIndex + 1
+        current_thumbnail = songs[nextIndex].thumbnail
         if (nextIndex < songs.size) {
             playSongAt(nextIndex)
         } else {
@@ -74,6 +78,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // Play the next song
     fun playPrevious() {
         val nextIndex = currentSongIndex - 1
+        current_thumbnail = songs[nextIndex].thumbnail
         if (nextIndex < songs.size) {
             playSongAt(nextIndex)
         } else {
@@ -97,6 +102,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // Load songs from the context
     fun loadSongs(context: Context) {
+        songs.clear()
+        songs.addAll(getAllAudioFiles(context))
+    }
+
+    fun loadSongsOnline(context: Context) {
         songs.clear()
         songs.addAll(getAllAudioFiles(context))
     }
