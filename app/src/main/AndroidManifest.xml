@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- For older Android versions -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -9,6 +10,8 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- For background operation -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.INTERNET"/>
+
 
 
     <application
@@ -30,7 +33,14 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
         </activity>
+        <activity
+            android:name=".MainActivityOnline"
+            android:exported="true"
+            android:theme="@style/Theme.MyMusic"/>
+
+
     </application>
 
 </manifest>
